@@ -1,0 +1,250 @@
+---
+title: "Micro612_2_Assignment_NL"
+author: "Nick Lesniak"
+date: "April 29, 2016"
+output: html_document
+runtime: shiny
+---
+
+
+```{r, echo=FALSE}
+alpha_v123 <- read.table('stability_new.an.groups.ave-std.summary',sep='\t',header = T)
+alpha_v123 <- alpha_v123[alpha_v123$method=='ave',]
+design_file <- read.table('mouse.time.design',sep='\t',header=T)
+ALPHA_PLOT_DATA <- merge(alpha_v123,design_file,by='group')
+
+library('rgl')
+library("rglwidget")
+library('shinyFiles')
+library('ggplot2')
+library("knitr")
+knit_hooks$set(webgl = hook_webgl)
+
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+  library(plyr)
+  length2 <- function (x, na.rm=FALSE) {
+    if (na.rm) sum(!is.na(x))
+    else       length(x)
+  }
+  # This does the summary. For each group's data frame, return a vector with
+  # N, mean, and sd
+  datac <- ddply(data, groupvars, .drop=.drop,
+                 .fun = function(xx, col) {
+                   c(N    = length2(xx[[col]], na.rm=na.rm),
+                     mean = mean   (xx[[col]], na.rm=na.rm),
+                     sd   = sd     (xx[[col]], na.rm=na.rm)
+                   )
+                 },
+                 measurevar
+  )
+  
+  # Rename the "mean" column    
+  datac <- rename(datac, c("mean" = measurevar))
+  
+  datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+  
+  # Confidence interval multiplier for standard error
+  # Calculate t-statistic for confidence interval: 
+  # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+  ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+  datac$ci <- datac$se * ciMult
+  
+  return(datac)
+}
+
+Summary_Sobs <- summarySE(ALPHA_PLOT_DATA, measurevar="sobs", groupvars='time')
+colnames(Summary_Sobs)[3] <- 'mean'
+Summary_Sobs <- merge(ALPHA_PLOT_DATA, Summary_Sobs, by='time')
+
+Summary_invs <- summarySE(ALPHA_PLOT_DATA, measurevar="invsimpson", groupvars='time')
+colnames(Summary_invs)[3] <- 'mean'
+Summary_invs <- merge(ALPHA_PLOT_DATA, Summary_invs, by='time')
+
+NMDS_v123 <- read.table('stability_new.an.thetayc.0.03.lt.ave.nmds.axes', sep='\t',header=T)
+NMDS_v123_time <- merge(NMDS_v123, design_file, by='group')
+
+tax_v123 <- read.table('stability_new.an.cons.taxonomy',sep='\t',header=T)
+meta_v123 <- read.table('stability_new.an.0.03.subsample.0.03.Late-Early.metastats',sep='\t',header=T)
+lefse_v123 <- read.table('stability_new.an.0.03.subsample.0.03.lefse_summary',sep='\t',header=T,fill=T)
+RF_v123 <- read.table('stability_new.an.0.03.subsample.RF.0.03.summary',sep='\t',header=T)
+
+lefse_v123 <- lefse_v123[complete.cases(lefse_v123$pValue),]
+meta_v123 <- meta_v123[meta_v123$p.value < 0.05,]
+RF_v123 <- RF_v123[RF_v123$Mean.decrease.accuracy >= 0.05,]
+population_v123 <- merge(meta_v123,lefse_v123, by='OTU')
+population_v123 <- merge(population_v123,RF_v123, by='OTU')
+population_v123 <- merge(population_v123,tax_v123, by='OTU')
+
+tax_sop <- read.table('stability_old.an.cons.taxonomy',sep='\t',header=T)
+meta_sop <- read.table('stability_old.an.0.03.subsample.0.03.Late-Early.metastats',sep='\t',header=T)
+lefse_sop <- read.table('stability_old.an.0.03.subsample.0.03.lefse_summary',sep='\t',header=T,fill=T)
+RF_sop <- read.table('stability_old.an.0.03.subsample.RF.0.03.summary',sep='\t',header=T)
+
+lefse_sop <- lefse_sop[complete.cases(lefse_sop$pValue),]
+meta_sop <- meta_sop[meta_sop$p.value < 0.05,]
+RF_sop <- RF_sop[RF_sop$Mean.decrease.accuracy >= 0.05,]
+population_sop <- merge(meta_sop,lefse_sop, by='OTU')
+population_sop <- merge(population_sop,RF_sop, by='OTU')
+population_sop <- merge(population_sop,tax_sop, by='OTU')
+
+
+```
+##Analysis of Training Dataset with latest Silva Reference (v123)
+
+
+###Create and analyze shared file
+mothur commands used to generate the shared and taxonomy files from the fasta files.
+
+```{r eval=FALSE}
+pcr.seqs(fasta=silva.nr_v123.align, start=11894, end=25319, keepdots=F)
+system(mv silva.nr_v123.pcr.align silva_v123.v4.fasta)
+make.contigs(file=stability_silva_v123.files, processors=8)
+screen.seqs(fasta=current, group=current, maxambig=0, maxlength=275)
+unique.seqs()
+count.seqs(name=current, group=current)
+align.seqs(fasta=current, reference=silva_v123.v4.fasta)
+screen.seqs(fasta=current, count=current, start=1968, end=11550, maxhomop=8)
+filter.seqs(fasta=current, vertical=T, trump=.)
+unique.seqs(fasta=current, count=current)
+pre.cluster(fasta=current, count=current, diffs=2)
+chimera.uchime(fasta=current, count=current, dereplicate=t)
+remove.seqs(fasta=current, accnos=current)
+classify.seqs(fasta=current, count=current, reference=silva_v123.v4.fasta, taxonomy=silva.nr_v123.tax, cutoff=80)
+remove.lineage(fasta=current, count=current, taxonomy=current, taxon=Chloroplast-Mitochondria-unknown-Archaea-Eukaryota)
+remove.groups(count=current, fasta=current, taxonomy=current, groups=Mock)
+cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, cutoff=0.15)
+make.shared(list=current, count=current, label=0.03)
+classify.otu(list=current, count=current, taxonomy=current, label=0.03)
+phylotype(taxonomy=current)
+```
+
+mothur commands run to analyze the shared file
+
+```{r eval=FALSE}
+system(mv stability_silva_v123.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.shared stability_new.an.shared)
+system(mv stability_silva_v123.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.0.03.cons.taxonomy stability_new.an.cons.taxonomy)
+count.groups(shared=stability_new.an.shared)
+sub.sample(shared=stability_new.an.shared, size=2440)
+rarefaction.single(shared=stability_new.an.shared, calc=sobs, freq=100)
+summary.single(shared=stability_new.an.shared, calc=nseqs-coverage-sobs-invsimpson, subsample=2440)
+dist.shared(shared=stability_new.an.shared, calc=thetayc-jclass, subsample=2440)
+nmds(phylip=stability_new.an.thetayc.0.03.lt.ave.dist, mindim=3, maxdim=3)
+amova(phylip=stability_new.an.thetayc.0.03.lt.ave.dist, design=mouse.time.design)
+homova(phylip=stability_new.an.thetayc.0.03.lt.ave.dist, design=mouse.time.design)
+metastats(shared=stability_new.an.0.03.subsample.shared, design=mouse.time.design)
+lefse(shared=stability_new.an.0.03.subsample.shared, design=mouse.time.design)
+classify.rf(shared=stability_new.an.0.03.subsample.shared, design=mouse.time.design)
+```
+
+***
+***
+
+#Analysis of output
+
+When using the most recent Silva Reference files (Release 123)[^1] for the mothur MiSeq SOP[^2], as expected, we observe similar results when looking at alpha and beta diversity. 
+
+##Alpha diversity
+
+As with the previous Silva reference files, richness and diversity is not significantly different between the mice or time points.
+
+```{r, echo=FALSE}
+ggplot(Summary_Sobs, aes(x= time , y= sobs))+ 
+  geom_dotplot(binaxis='y', stackdir='center', binwidth=1, dotsize = 2) +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd),width=.1,)+
+  geom_errorbar(aes(ymin=mean, ymax=mean),width=.3)+
+  ggtitle(expression(atop('Alpha Diversity - Richness',
+                          atop('Error bars represent Mean +/- Standard Deviation')))) +
+  ylab('Sobs') + xlab('Time Point') + ylim(0,160)
+```
+
+```{r, echo=FALSE}
+ggplot(Summary_invs, aes(x= time , y= invsimpson))+ 
+    geom_dotplot(binaxis='y', stackdir='center', binwidth=1, dotsize = 0.8) +
+    geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd),width=.1,)+
+    geom_errorbar(aes(ymin=mean, ymax=mean),width=.3)+
+    ggtitle(expression(atop('Alpha Diversity - Diversity',
+                            atop('Error bars represent Mean +/- Standard Deviation')))) +
+    ylab('Inverse Simpson Index') + xlab('Time Point') +
+    ylim(0,40)
+```
+
+***
+##Beta diversity
+
+Again, with the Release 123 Silva reference files, we see the early and late time points clustering into significantly different groups (AMOVA p <0.001) with the earlier samples having a significantly greater variation (HOMOVA p < 0.001) than the later samples (0.0603828 compared to 0.00774273, respectively).
+
+```{r, testgl, webgl=TRUE,echo=FALSE}
+plot3d(NMDS_v123_time$axis1,NMDS_v123_time$axis2,NMDS_v123_time$axis3,
+       col=((NMDS_v123_time$time=='Early')*1+1),
+       xlab='Axis 1', ylab='Axis 2', zlab='Axis 3',
+       main='NMDS', sub='',box=F)
+  legend3d('bottomright',c('Early','Late'), pch=16,col=c(2,1))
+```
+***
+##Population Analysis
+
+When looking at the OTUs significantly differentiating the early and late groups and their classification, we observe many are conserved, however there are some differences, such as Porphyromonadaceae becoming Bacteroidales_S24-7_group and the appearance of Roseburia.
+
+```{r, echo = FALSE}
+numericInput("rows", "Top # of OTUs", 5)
+```
+
+###Classifications of top OTUs separating Early and Late populations (via metastats)
+####Release 123 Silva Reference files
+```{r, echo = FALSE}
+#top 10 affecting population by metastats
+renderTable({
+head(population_v123[order(-population_v123$mean.group1.),c(1,2,15)],addrownums=F, input$rows)
+})
+```
+
+####MiSeq SOP Silva Reference files
+```{r, echo = FALSE}
+#top 10 affecting population by metastats
+renderTable({
+head(population_sop[order(-population_sop$mean.group1.),c(1,2,15)],addrownums=F,input$rows)
+})
+```
+
+###Classifications of top OTUs separating Early and Late populations (via lefse)
+####Release 123 Silva Reference files
+```{r, echo=FALSE}
+#top 10 affecting population by lefse
+renderTable({
+head(population_v123[order(-population_v123$LogMaxMean),c(1,9,15)],addrownums=F,input$rows)
+    })
+```
+
+####MiSeq SOP Silva Reference files
+```{r, echo=FALSE}
+  #top affecting population by lefse
+renderTable({
+head(population_sop[order(-population_sop$LogMaxMean),c(1,9,15)],addrownums=F,input$rows)
+    })
+```
+
+###Classifications of top OTUs with greatest mean decrease between Early and Late populations (via classify.RF)
+####Release 123 Silva Reference files
+```{r, echo=FALSE}
+#top 10 affect population by RF
+  renderTable({
+head(population_v123[order(-population_v123$Mean.decrease.accuracy),c(1,13,14,15)],addrownums=F,input$rows)
+})
+```
+
+####MiSeq SOP Silva Reference files
+```{r, echo=FALSE}
+#top 10 affect population by RF
+  renderTable({
+head(population_sop[order(-population_sop$Mean.decrease.accuracy),c(1,13,14,15)],addrownums=F,input$rows)
+})
+```
+
+
+***
+***
+[^1]:http://www.mothur.org/wiki/Silva_reference_files
+[^2]:http://www.mothur.org/wiki/MiSeq_SOP
+
+
